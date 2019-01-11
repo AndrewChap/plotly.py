@@ -1,5 +1,9 @@
 # plotly.py
 
+Fork for streamlining the plotly.py-to-[reveal.js](https://github.com/hakimel/reveal.js/) workflow.  Will require an output option (in addition to 'file' and 'div') in plotly.offline that outputs a .js file for easy inclusion in a reveal.js html presentation file.
+
+Rest of README.md from trunk below:
+
 <table>
     <tr>
         <td>Latest Release</td>
