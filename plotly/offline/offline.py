@@ -28,7 +28,6 @@ __PLOTLY_OFFLINE_INITIALIZED = False
 
 __IMAGE_FORMATS = ['jpeg', 'png', 'webp', 'svg']
 
-
 def download_plotlyjs(download_url):
     warnings.warn('''
         `download_plotlyjs` is deprecated and will be removed in the
@@ -311,7 +310,8 @@ def init_notebook_mode(connected=False):
 
 
 def _plot_html(figure_or_data, config, validate, default_width,
-               default_height, global_requirejs):
+               default_height, global_requirejs, plotdivid=None,
+               js_external=False,filename=None):
 
     figure = tools.return_figure_from_figure_or_data(figure_or_data, validate)
 
@@ -332,7 +332,9 @@ def _plot_html(figure_or_data, config, validate, default_width,
     else:
         height = str(height) + 'px'
 
-    plotdivid = uuid.uuid4()
+    if plotdivid is None:
+        plotdivid = uuid.uuid4()
+
     jdata = _json.dumps(figure.get('data', []), cls=utils.PlotlyJSONEncoder)
     jlayout = _json.dumps(figure.get('layout', {}),
                           cls=utils.PlotlyJSONEncoder)
@@ -381,18 +383,18 @@ def _plot_html(figure_or_data, config, validate, default_width,
         '<div id="{id}" style="height: {height}; width: {width};" '
         'class="plotly-graph-div">'
         '</div>'
-        '<script type="text/javascript">' +
+        '<script type="text/javascript" src="{filename}"></script>'
+        ).format(
+        id=plotdivid, height=height, width=width, filename=filename)
+    plotly_js = (
         optional_line1 +
         'window.PLOTLYENV=window.PLOTLYENV || {{}};'
         'window.PLOTLYENV.BASE_URL="' + plotly_platform_url + '";'
         '{script}' +
         optional_line2 +
-        '</script>'
-        '').format(
-        id=plotdivid, script=script,
-        height=height, width=width)
+        '').format(script=script)
 
-    return plotly_html_div, plotdivid, width, height
+    return plotly_html_div, plotly_js, plotdivid, width, height
 
 
 def iplot(figure_or_data, show_link=False, link_text='Export to plot.ly',
@@ -472,7 +474,7 @@ def iplot(figure_or_data, show_link=False, link_text='Export to plot.ly',
     display_bundle = {'application/vnd.plotly.v1+json': fig}
 
     if __PLOTLY_OFFLINE_INITIALIZED:
-        plot_html, plotdivid, width, height = _plot_html(
+        plot_html, plotly_js, plotdivid, width, height = _plot_html(
             figure_or_data, config, validate, '100%', 525, True
         )
         resize_script = ''
@@ -515,7 +517,7 @@ def plot(figure_or_data, show_link=False, link_text='Export to plot.ly',
          validate=True, output_type='file', include_plotlyjs=True,
          filename='temp-plot.html', auto_open=True, image=None,
          image_filename='plot_image', image_width=800, image_height=600,
-         config=None, include_mathjax=False):
+         config=None, include_mathjax=False, plot_div_id=None):
     """ Create a plotly graph locally as an HTML document or string.
 
     Example:
@@ -626,23 +628,35 @@ def plot(figure_or_data, show_link=False, link_text='Export to plot.ly',
         references the specified path. This approach can be used to point the
         resulting HTML file to an alternative CDN.
     """
-    if output_type not in ['div', 'file']:
+    if output_type not in ['div', 'file', 'file_js']:
         raise ValueError(
-            "`output_type` argument must be 'div' or 'file'. "
+            "`output_type` argument must be 'div', 'file', or 'file_js'. "
             "You supplied `" + output_type + "``")
     if not filename.endswith('.html') and output_type == 'file':
         warnings.warn(
             "Your filename `" + filename + "` didn't end with .html. "
             "Adding .html to the end of your file.")
         filename += '.html'
+    if not filename.endswith('.js') and output_type == 'file_js':
+        warnings.warn(
+            "Your filename `" + filename + "` didn't end with .js. "
+            "Adding .js to the end of your file.")
+        filename += '.js'
 
     config = dict(config) if config else {}
     config.setdefault('showLink', show_link)
     config.setdefault('linkText', link_text)
 
-    plot_html, plotdivid, width, height = _plot_html(
+    if output_type == 'file_js':
+        js_external = True
+    else:
+        js_external = False
+
+    plot_html, plotly_js, plotdivid, width, height = _plot_html(
         figure_or_data, config, validate,
-        '100%', '100%', global_requirejs=False)
+        '100%', '100%', global_requirejs=False,
+        plotdivid=plot_div_id, js_external=js_external,
+        filename=filename)
 
     # Build resize_script
     resize_script = ''
@@ -682,7 +696,7 @@ def plot(figure_or_data, show_link=False, link_text='Export to plot.ly',
 
     if include_mathjax == 'cdn':
         mathjax_script = _build_mathjax_script(
-            url=('https://cdnjs.cloudflare.com' 
+            url=('https://cdnjs.cloudflare.com'
                  '/ajax/libs/mathjax/2.7.5/MathJax.js')) + _mathjax_config
     elif (isinstance(include_mathjax, six.string_types) and
           include_mathjax.endswith('.js')):
@@ -695,7 +709,7 @@ def plot(figure_or_data, show_link=False, link_text='Export to plot.ly',
 Invalid value of type {typ} received as the include_mathjax argument
     Received value: {val}
 
-include_mathjax may be specified as False, 'cdn', or a string ending with '.js' 
+include_mathjax may be specified as False, 'cdn', or a string ending with '.js'
 """.format(typ=type(include_mathjax), val=repr(include_mathjax)))
 
     if output_type == 'file':
@@ -753,7 +767,29 @@ include_mathjax may be specified as False, 'cdn', or a string ending with '.js'
                 resize_script,
                 '</div>',
             ])
+    elif output_type == 'file_js':
+        with open(filename, 'w') as f:
+            if image:
+                if image not in __IMAGE_FORMATS:
+                    raise ValueError('The image parameter must be one of the '
+                                     'following: {}'.format(__IMAGE_FORMATS)
+                                     )
+                # if the check passes then download script is injected.
+                # write the download script:
+                script = get_image_download_script('plot')
+                script = script.format(format=image,
+                                       width=image_width,
+                                       height=image_height,
+                                       filename=image_filename,
+                                       plot_id=plotdivid)
+            else:
+                script = ''
 
+            print('saved {}'.format(filename))
+            print('paste the following line into your html file:')
+            print(plot_html)
+
+            f.write(plotly_js)
 
 def plot_mpl(mpl_fig, resize=False, strip_style=False,
              verbose=False, show_link=False, link_text='Export to plot.ly',
